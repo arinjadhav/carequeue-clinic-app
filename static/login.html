@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · CareQueue</title>
+<link rel="icon" type="image/svg+xml" href="/static/img/favicon.svg">
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css"><link rel="stylesheet" href="/static/login.css">
+<script src="/static/login.js" defer></script></head>
+<body class="login-body"><main class="login-card">
+<img class="login-logo" src="/static/img/logo.svg" alt="" width="56" height="56">
+<h1>Welcome back</h1><p class="login-sub">Sign in to the CareQueue clinic desk.</p>
+<img class="login-art" src="/static/img/hero.svg" alt="" width="300" height="158">
+<form id="login-form" autocomplete="on">
+<label class="field-label" for="username">Username</label><input class="form-input" id="username" name="username" autocomplete="username" required maxlength="64" autofocus>
+<label class="field-label" for="password">Password</label><input class="form-input" id="password" name="password" type="password" autocomplete="current-password" required maxlength="128">
+<p class="login-error hidden" id="login-error" role="alert"></p>
+<button class="primary-button login-submit" id="login-submit" type="submit">Sign in <span>→</span></button></form>
+<p class="form-note"><span>ⓘ</span> Prototype only. Use fictional patient data.</p></main></body></html>

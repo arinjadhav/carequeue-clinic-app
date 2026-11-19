@@ -1,0 +1,41 @@
+services:
+  clinic-queue:
+    build: .
+    container_name: clinic-queue
+    environment:
+      APP_TIMEZONE: Asia/Kolkata
+      MONITORING_RESULTS_PATH: /monitoring-results
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SECRET_KEY: ${SECRET_KEY:-}
+      COOKIE_SECURE: ${COOKIE_SECURE:-0}
+      CRASH_RECOVERY_DELAY: ${CRASH_RECOVERY_DELAY:-12}
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    ports:
+      - "8000:8000"
+    volumes:
+      - clinic_data:/data
+      - ./monitoring/results:/monitoring-results:ro
+    restart: unless-stopped
+
+  clinic-monitor:
+    build: .
+    container_name: clinic-monitor
+    user: "0:0"
+    command: ["python", "scripts/monitor.py", "--url", "http://clinic-queue:8000/health", "--interval", "5", "--continuous"]
+    environment:
+      MONITORING_RESULTS_PATH: /monitoring-results
+    depends_on:
+      clinic-queue:
+        condition: service_healthy
+    volumes:
+      - ./monitoring/results:/monitoring-results
+    restart: unless-stopped
+    healthcheck:
+      disable: true
+
+volumes:
+  clinic_data:
