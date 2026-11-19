@@ -1,115 +1,167 @@
-# CareQueue clinic appointment prototype
+# CareQueue: Clinic Appointment Queue
 
-A small clinic front-desk demo for the cloud mini-project. It supports creating and editing appointments, changing visit status, removing appointments, filtering the day’s schedule, and displaying the live waiting queue. It includes a `/health` endpoint for a simple availability check.
+A small clinic front-desk web app built as a **Cloud Computing mini project** (industry use case: healthcare). It manages appointments and the waiting room, and it includes the pieces needed to measure **SLA** and **TTR** on **AWS** with **Docker**.
 
-The **SLA & recovery** section in the app shows the latest availability / latency summary and incident history from a separate local monitor container. Compose starts both containers; the monitor checks the app every five seconds and the panel refreshes automatically. The app container receives the results folder as a read-only mount.
+> Prototype only. Use fictional patient data. Never enter real patient information.
 
-## Demo-data boundary
+## Features
 
-This is a classroom prototype, not a production healthcare system. Use fictional names and appointment details only. It has no login, role-based access control, encryption workflow, audit trail, backups, or production privacy controls. Do not enter real patient information.
+- Add, edit, delete appointments; change status (Waiting, In progress, Completed, Cancelled)
+- Live waiting room, search, filters and daily summary
+- Admin sign-in with signed session cookie, login rate limiting and security headers
+- Collapsible **Admin panel**: SLA and recovery dashboard, system info (vCPU, memory, storage), live performance (average, P95, P99), activity log, and a container-crash button for TTR demos
+- Structured JSON request logs, ready for CloudWatch
+- `/health` endpoint, container health check, and an external monitor container
 
-## Run locally with Docker
+**Stack:** Python 3.12, FastAPI, SQLite, vanilla JS/CSS, Docker Compose.
 
-After extracting the ZIP in Downloads:
+## Requirements
 
-```sh
-cd ~/Downloads/clinic-queue-app
-docker compose up --build
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (or Docker Engine with the Compose plugin)
+- Git
+
+## Install and run (Docker)
+
+```bash
+git clone https://github.com/arinjadhav/carequeue-clinic-app.git
+cd carequeue-clinic-app
 ```
 
-Open <http://localhost:8000>. The first launch seeds four fictional appointments for today. The named Docker volume keeps the SQLite demo database across container restarts. The container checks `/health` every ten seconds and uses a restart policy for unexpected exits.
+Create a `.env` file with your admin login (this file is never committed):
 
-To stop the demo:
-
-```sh
-docker compose down
+```bash
+cat > .env <<EOF
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=choose-a-long-passphrase
+SECRET_KEY=$(python3 -c "import secrets;print(secrets.token_hex(32))")
+COOKIE_SECURE=0
+CRASH_RECOVERY_DELAY=12
+EOF
 ```
 
-To remove the demo database and reset the fictional appointments:
+Start the app:
 
-```sh
-docker compose down -v
+```bash
+bash start.sh
 ```
 
-## Run without Docker
+`start.sh` builds the containers, waits until the app responds, prints the link and sign-in details, and opens the browser. Or run it manually:
 
-```sh
+```bash
+docker compose up --build -d
+```
+
+Then open **http://localhost:8000/login** and sign in with the username and password from your `.env`.
+
+Useful commands:
+
+```bash
+docker compose ps                       # check containers
+docker compose logs -f clinic-queue     # view app logs
+docker compose down                     # stop (keeps data)
+docker compose down -v                  # stop and delete the database
+```
+
+## Install without Docker
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+export ADMIN_PASSWORD=choose-a-long-passphrase
+uvicorn app.main:app --reload --port 8000
 ```
 
-Open <http://localhost:8000>. The database is created at `data/clinic.db`.
+Open http://localhost:8000/login. The database is created at `data/clinic.db`. The SLA dashboard needs the monitor container, so it stays empty in this mode.
 
-## Routes
+## Deploy on AWS (EC2 + Docker)
 
-- `GET /health` — service health and timestamp
-- `GET /api/appointments` — today’s appointments; supports `day`, `status`, and `search` query parameters
-- `GET /api/summary` — counts by appointment status
-- `POST /api/appointments` — add a fictional appointment
-- `PATCH /api/appointments/{id}` — update its status
-- `DELETE /api/appointments/{id}` — remove a demo appointment
+1. **Account:** create an AWS account, turn on MFA, and set a Budget alert. Use the Mumbai region (`ap-south-1`).
+2. **IAM role:** create an EC2 role with `AmazonSSMManagedInstanceCore` and `CloudWatchAgentServerPolicy`.
+3. **Launch EC2:** Amazon Linux 2023, a *Free tier eligible* instance type, no key pair (use Session Manager), 20 GB encrypted gp3 storage, the IAM role above, and a security group with **one** inbound rule: TCP 8000 from **My IP**.
+4. **Connect:** EC2, Connect, Session Manager. Install Docker and Compose:
 
-## Mini-project status and evidence
-
-The local prototype and measurements are ready for a classroom demo. See `AWS-DEPLOYMENT.md` for the proposed AWS design and deployment checklist. AWS resources have not been created.
-
-Recorded evidence (all local; not AWS measurements):
-
-- Controlled Docker recovery: TTR 20.09 seconds, against the proposed 120-second target.
-- Read-only appointment API load run: 200/200 successes at concurrency 10; P95 33.33 ms and P99 63.26 ms.
-- One sampled monitor window: 99.083% across 436 checks (432 successful); this short window is not a monthly SLA result.
-- The monitor run also ended with an incomplete outage record, so do not present its aggregate availability as proof of the target. The controlled recovery result is reported separately.
-
-## Local SLA / TTR measurement
-
-Start the app and external monitor with `docker compose up --build -d`. Wait about 10 seconds, then open the app’s **SLA & recovery** section. The monitor writes a CSV and a live JSON summary under `monitoring/results/`; the dashboard reads the summary automatically.
-
-For a controlled recovery demonstration, run this in a separate terminal while the app is open. This simulates an operator-detected service outage and manual container recovery:
-
-```sh
-docker compose stop clinic-queue
-# Wait for the monitor to record a failed check (about 5-10 seconds)
-docker compose start clinic-queue
+```bash
+sudo dnf install -y docker git
+sudo systemctl enable --now docker
+sudo mkdir -p /usr/local/lib/docker/cli-plugins
+sudo curl -SL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64 -o /usr/local/lib/docker/cli-plugins/docker-compose
+sudo chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
 ```
 
-The separate monitor keeps running. It records the first failed check as detection and confirms recovery after two healthy checks. The dashboard then shows the observed TTR and incident. This measures the local Docker demo; it is not CloudWatch evidence or a production SLA measurement.
+5. **Deploy:**
 
-To inspect the monitor’s live output, run `docker compose logs -f clinic-monitor`.
-
-Optional target settings:
-
-```sh
-python3 scripts/monitor.py --duration-minutes 10 --interval 5 --availability-target 99.5 --p95-target-ms 2000 --ttr-target-seconds 120
+```bash
+git clone https://github.com/arinjadhav/carequeue-clinic-app.git
+cd carequeue-clinic-app
+cat > .env <<EOF
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=use-a-strong-password-here
+SECRET_KEY=$(python3 -c "import secrets;print(secrets.token_hex(32))")
+COOKIE_SECURE=0
+CRASH_RECOVERY_DELAY=12
+EOF
+sudo docker compose up --build -d
+curl localhost:8000/health
 ```
 
-Optional read-only appointment-list load run:
+6. **Open:** `http://<EC2-public-IPv4>:8000/login`
+7. **Monitoring:** create a CloudWatch alarm on `StatusCheckFailed` for the instance.
+8. **Clean up:** terminate the instance when finished, and check for leftover volumes and Elastic IPs.
 
-```sh
-python3 scripts/load_test.py --url http://localhost:8000/api/appointments?day=2026-11-19 --requests 200 --concurrency 10
+## Measuring SLA and TTR
+
+| Metric | Target (proposed) | Where to see it |
+|---|---|---|
+| Availability | 99.5% | Admin panel, Reliability center |
+| Health-check P95 latency | under 2,000 ms | Admin panel, Reliability center |
+| TTR | under 120 s | Admin panel, incident history |
+| RTO / RPO | 2 min / 24 h | Admin panel, Failure injection |
+
+**Controlled recovery test:** open the Admin panel and click **Simulate container crash** (or run `docker compose stop clinic-queue`, wait about 10 seconds, then `docker compose start clinic-queue`). The external monitor records detection and recovery, and the dashboard shows the measured TTR.
+
+**Load test:** sign in, copy the `cq_session` cookie from your browser, then run:
+
+```bash
+CAREQUEUE_COOKIE="cq_session=..." python3 scripts/load_test.py
 ```
 
-The accompanying project presentation lists the assignment checklist and remaining AWS evidence. This remains a classroom prototype; never enter real patient data.
+Results are saved to `monitoring/results/`.
 
-## Security (v0.2)
+## Security
 
-- **Admin sign-in:** copy `.env.example` to `.env` and set `ADMIN_USERNAME`, `ADMIN_PASSWORD` and `SECRET_KEY` before `docker compose up --build`. If no password is set, a one-time password is generated and printed in `docker compose logs clinic-queue`.
-- Signed, HttpOnly, SameSite=Strict session cookie (8 h); login rate-limited to 5 attempts per 5 minutes per IP; all `/api/*` routes require a session; only `/health` and the login page are public.
-- Security headers (CSP, X-Frame-Options, nosniff, no-referrer), API docs disabled, `no-store` caching on data, input rejects `<` and `>` in names, container runs as non-root with `no-new-privileges` and all capabilities dropped.
-- **Structured JSON request logs** (timestamp, IP, user, method, path, status, ms) go to stdout for CloudWatch; login failures are logged as warnings.
-- Set `COOKIE_SECURE=1` once HTTPS is in front of the app (ALB/CloudFront). Not covered: HTTPS termination, password hashing in a user table, multi-user roles, encryption of the SQLite file at rest (use an encrypted EBS volume).
-- `/auth/login` and `/auth/logout` are new routes. For the load test, sign in, copy the `cq_session` cookie and run `CAREQUEUE_COOKIE="cq_session=..." python3 scripts/load_test.py`.
+- Signed HttpOnly, SameSite=Strict session cookie; login limited to 5 attempts per 5 minutes per IP
+- All `/api/*` routes require sign-in; only `/health` and the login page are public
+- CSP, X-Frame-Options, nosniff and no-referrer headers; API docs disabled
+- Secrets in `.env` (git-ignored); container runs as non-root, drops all capabilities and blocks privilege escalation
+- Not covered: HTTPS (use an Application Load Balancer with an ACM certificate and set `COOKIE_SECURE=1`), multi-user roles, password hashing in a user table
 
-## Operations panel (v0.3)
+## Project structure
 
-- **System info** (`GET /api/system`): host/container, OS, vCPU, memory, storage, uptime. Run it on EC2 for the VM-specification slide (note: inside Docker, vCPU and memory reflect the host VM).
-- **Live performance** (`GET /api/performance`): average, P95, P99 and throughput over the last 5 minutes of app requests.
-- **Activity log** (`GET /api/activity`): recent changes, sign-ins and errors.
-- **Failure injection** (`POST /api/simulate-failure`): crashes the container; Docker's `restart: unless-stopped` brings it back after ~`CRASH_RECOVERY_DELAY` seconds (default 12, set in `.env`), and the external monitor records the TTR. Use on the demo only.
+```
+app/main.py          FastAPI app, auth, API routes, logging
+static/              Frontend (index.html, login.html, app.js, styles.css, img/)
+scripts/             monitor.py (external monitor), load_test.py
+compose.yaml         App and monitor containers
+Dockerfile           Python 3.12 slim image, non-root user
+start.sh             One-command start
+AWS-DEPLOYMENT.md    AWS design notes
+PROJECT-RESULTS.md   Recorded measurements
+```
 
-## Admin panel & `.env`
+## API routes
 
-The reliability center, system info, live performance, activity log and failure injection now live in a collapsible **Admin panel** directly under the appointments (sidebar: *Admin panel*). A starter `.env` (admin / user123) is included for local demos only: change the password before deploying to AWS, and never commit `.env` (it is in `.gitignore` and `.dockerignore`).
+| Route | Purpose |
+|---|---|
+| `GET /health` | Health check (public) |
+| `POST /auth/login`, `POST /auth/logout` | Sign in and out |
+| `GET/POST /api/appointments` | List and create appointments |
+| `PATCH/DELETE /api/appointments/{id}` | Update or delete an appointment |
+| `GET /api/summary` | Counts by status |
+| `GET /api/monitoring` | Latest monitor reports |
+| `GET /api/system` | VM and container details |
+| `GET /api/performance` | Latency and throughput (last 5 minutes) |
+| `GET /api/activity` | Recent changes and sign-ins |
+| `POST /api/simulate-failure` | Crash the container for a recovery demo |
 
-- **One-command start:** `bash start.sh` builds and starts the app, prints the link and sign-in details, and opens the browser.
+<br>
